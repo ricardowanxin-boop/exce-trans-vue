@@ -1,0 +1,8 @@
+{
+  "name": "parse-function",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "exceljs": "^4.3.0"
+  }
+}
