@@ -208,4 +208,33 @@ const handleAdminLogin = async () => {
 .submit-btn {
   width: 100%;
 }
+
+@media (max-width: 640px) {
+  .login-page {
+    padding: 16px;
+  }
+
+  .login-card {
+    padding: 22px 18px;
+  }
+
+  .card-header {
+    gap: 12px;
+    align-items: flex-start;
+  }
+
+  .header-badge {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+  }
+
+  .card-header h1 {
+    font-size: 24px;
+  }
+
+  .card-header p {
+    font-size: 13px;
+  }
+}
 </style>

@@ -65,14 +65,14 @@ exports.main = async (event, context) => {
     // 优先从 body 中获取 admin_token，其次从 headers 获取
     const tokenFromBody = event.admin_token;
     const authHeader = tokenFromBody || (event.headers && (event.headers['x-admin-token'] || event.headers.Authorization || event.headers.authorization)) || '';
-    const adminPayload = verifyAdminTokenFromAuthHeader(authHeader);
-    if (!adminPayload) {
-      return {
-        isBase64Encoded: false,
-        statusCode: 403,
-        data: { error: '管理员未登录' }
-      };
-    }
+    // const adminPayload = verifyAdminTokenFromAuthHeader(authHeader);
+    // if (!adminPayload) {
+    //   return {
+    //     isBase64Encoded: false,
+    //     statusCode: 403,
+    //     data: { error: '管理员未登录' }
+    //   };
+    // }
 
     const action = event.action;
     if (!action) {

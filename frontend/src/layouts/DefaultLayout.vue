@@ -79,7 +79,7 @@ const handleLogout = () => {
 .layout-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: minmax(236px, 280px) minmax(0, 1fr);
 }
 
 .sidebar {
@@ -196,7 +196,22 @@ const handleLogout = () => {
 
 .main-content {
   min-width: 0;
-  padding: 28px;
+  padding: clamp(16px, 2.4vw, 28px);
+  overflow-x: hidden;
+}
+
+@media (max-width: 1200px) {
+  .layout-shell {
+    grid-template-columns: minmax(220px, 248px) minmax(0, 1fr);
+  }
+
+  .brand-card {
+    padding: 16px;
+  }
+
+  .brand-card h1 {
+    font-size: 22px;
+  }
 }
 
 @media (max-width: 960px) {
@@ -205,12 +220,78 @@ const handleLogout = () => {
   }
 
   .sidebar {
+    gap: 16px;
+    padding: 16px;
     border-right: none;
     border-bottom: 1px solid rgba(148, 163, 184, 0.16);
   }
 
+  .nav-menu {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .user-card {
+    margin-top: 0;
+  }
+
   .main-content {
     padding: 18px;
+  }
+}
+
+@media (max-width: 640px) {
+  .sidebar {
+    padding: 12px;
+  }
+
+  .brand-card {
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .brand-badge {
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    font-size: 14px;
+  }
+
+  .brand-card h1 {
+    font-size: 20px;
+  }
+
+  .brand-card p {
+    font-size: 12px;
+  }
+
+  .nav-menu {
+    grid-template-columns: 1fr;
+  }
+
+  .nav-item {
+    padding: 12px 14px;
+  }
+
+  .user-card {
+    padding: 14px;
+  }
+
+  .user-id {
+    font-size: 16px;
+  }
+
+  .quota-line {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .quota-line strong {
+    font-size: 16px;
+  }
+
+  .main-content {
+    padding: 12px;
   }
 }
 </style>

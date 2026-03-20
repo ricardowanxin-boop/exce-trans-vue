@@ -1,0 +1,10 @@
+{
+  "upload_id": "upload_35d7b487e0f545a8a9e27782f57af414",
+  "file_name": "demo.xlsx",
+  "file_size": 4820,
+  "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "status": "completed",
+  "next_chunk_index": 1,
+  "received_chunks": 1,
+  "total_chunks": 1
+}

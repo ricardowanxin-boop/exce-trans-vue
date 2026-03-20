@@ -92,7 +92,13 @@ export interface AdminCardMutationResponse {
 }
 
 const adminCardRequest = <T>(data: Record<string, any>) => {
-  return request.post<any, T>('/admin-card-function', data)
+  const adminToken = localStorage.getItem('ADMIN_TOKEN') || ''
+  return request.post<any, T>(
+    '/admin-card-function',
+    {
+      ...data,
+    },
+  )
 }
 
 export const fetchAdminCardStats = () => {

@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+export PYTHONPATH="./third_party:./:${PYTHONPATH}"
+export PY_API_PREFIX="${PY_API_PREFIX:-/python-api}"
+
+exec /var/lang/python310/bin/python3.10 app.py

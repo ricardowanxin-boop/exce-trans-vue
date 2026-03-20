@@ -1,8 +1,11 @@
-import request from './index'
+import request from './python'
 
 export interface ParseExcelParams {
   user_id: string
-  file_base64: string
+  file_base64?: string
+  file_id?: string
+  file_url?: string
+  upload_id?: string
   sheet_name?: string
 }
 
@@ -10,6 +13,7 @@ export interface PreviewData {
   coordinate: string
   text: string
   sheet_name?: string
+  source?: 'cell' | 'shape'
 }
 
 export interface ParseExcelResponse {

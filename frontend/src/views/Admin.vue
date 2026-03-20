@@ -528,8 +528,9 @@ onMounted(() => {
 
 <style scoped>
 .admin-console {
-  max-width: 1400px;
+  max-width: 1600px;
   margin: 0 auto;
+  min-width: 0;
 }
 
 .overview-grid {
@@ -537,6 +538,12 @@ onMounted(() => {
   grid-template-columns: minmax(0, 2fr) minmax(260px, 0.9fr);
   gap: 24px;
   margin-bottom: 24px;
+}
+
+.generate-card,
+.stats-card,
+.list-card {
+  min-width: 0;
 }
 
 .section-title {
@@ -657,6 +664,12 @@ code {
   gap: 12px;
 }
 
+@media (max-width: 1280px) {
+  .overview-grid {
+    grid-template-columns: minmax(0, 1.3fr) minmax(240px, 0.7fr);
+  }
+}
+
 @media (max-width: 1100px) {
   .overview-grid {
     grid-template-columns: 1fr;
@@ -673,6 +686,61 @@ code {
 
   .search-input {
     width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .section-title {
+    align-items: flex-start;
+  }
+
+  .section-title h3 {
+    font-size: 22px;
+  }
+
+  .stats-list {
+    gap: 14px;
+  }
+
+  .stat-row strong {
+    font-size: 34px;
+  }
+
+  .list-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .list-card {
+    overflow-x: auto;
+  }
+
+  .list-card :deep(.el-table) {
+    min-width: 980px;
+  }
+}
+
+@media (max-width: 560px) {
+  .emoji {
+    font-size: 22px;
+  }
+
+  .section-title h3 {
+    font-size: 20px;
+  }
+
+  .table-actions {
+    flex-wrap: wrap;
+  }
+
+  .table-actions :deep(.el-button) {
+    flex: 1 1 100px;
+    margin-left: 0;
+  }
+
+  .dialog-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 }
 </style>

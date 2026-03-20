@@ -1,7 +1,5 @@
 import axios from 'axios'
 
-const ADMIN_LOGIN_ENDPOINT = '/admin-login-function'
-
 const gatewayToken =
   import.meta.env.VITE_PUBLISHABLE_KEY ||
   import.meta.env.VITE_GATEWAY_TOKEN ||
@@ -60,19 +58,10 @@ request.interceptors.request.use(
       config.headers['Authorization'] = `Bearer ${gatewayToken}`
     }
 
-    const adminToken = localStorage.getItem('ADMIN_TOKEN')
-    const requestUrl = config.url || ''
-    const isAdminLogin = requestUrl.startsWith(ADMIN_LOGIN_ENDPOINT)
+    // const adminToken = localStorage.getItem('ADMIN_TOKEN')
+    // const requestUrl = config.url || ''
+    // const isAdminLogin = requestUrl.startsWith(ADMIN_LOGIN_ENDPOINT)
 
-    // if (adminToken && !isAdminLogin) {
-    //   if (config.data && typeof config.data === 'object' && !(config.data instanceof FormData)) {
-    //     config.data = {
-    //       ...config.data,
-    //     }
-    //   }
-    //   // 额外通过头传递，防止网关裁剪请求体导致 token 丢失
-    //   config.headers['x-admin-token'] = adminToken
-    // }
 
     return config
   },

@@ -84,6 +84,21 @@ function isWorkbookPayload(payload) {
   return values.every((value) => value && typeof value === 'object' && !Array.isArray(value));
 }
 
+function extractWorksheetPayload(worksheet) {
+  const sheetPayload = {};
+
+  worksheet.eachRow((row) => {
+    row.eachCell((cell) => {
+      const text = cell.text || (cell.value && cell.value.toString()) || '';
+      if (text) {
+        sheetPayload[cell.address] = text;
+      }
+    });
+  });
+
+  return sheetPayload;
+}
+
 async function callLLMTranslate(textsDict, targetLang) {
   if (!textsDict || Object.keys(textsDict).length === 0) return {};
   const systemPrompt = `你是一个专业的翻译专家。请将用户提供的 JSON 格式的文本翻译成 ${targetLang}。保持 JSON 的键名不变，只翻译值的内容。返回的必须是一个合法的 JSON 对象，不要包含其他解释说明文字。`;
@@ -121,6 +136,39 @@ async function findCardByUserIdentity(userId) {
   return cardRes;
 }
 
+async function loadBufferFromUploadId(uploadId) {
+  if (!uploadId) return null;
+
+  const sessionRes = await db
+    .collection('file_upload_sessions')
+    .where({ upload_id: String(uploadId) })
+    .limit(1)
+    .get()
+    .catch(() => null);
+
+  if (!sessionRes || !sessionRes.data || sessionRes.data.length === 0) {
+    throw new Error('上传文件会话不存在');
+  }
+
+  const session = sessionRes.data[0];
+  if (session.status !== 'completed') {
+    throw new Error('文件仍在上传中，请稍后重试');
+  }
+
+  const chunkRes = await db
+    .collection('file_upload_chunks')
+    .where({ upload_id: String(uploadId) })
+    .limit(1000)
+    .get();
+
+  const chunks = (chunkRes.data || []).sort((a, b) => Number(a.chunk_index || 0) - Number(b.chunk_index || 0));
+  if (!chunks.length) {
+    throw new Error('未找到已上传的文件分片');
+  }
+
+  return Buffer.concat(chunks.map((item) => Buffer.from(item.chunk_base64, 'base64')));
+}
+
 exports.main = async (event, context) => {
   if (event.httpMethod === 'OPTIONS') {
     return {
@@ -135,22 +183,15 @@ exports.main = async (event, context) => {
     const adminPayload = verifyAdminToken(event.admin_token) || verifyAdminTokenFromAuthHeader(authHeader);
     const isAdmin = !!adminPayload;
 
-    const { data, user_id, target_lang, file_base64, sheet_name } = event;
+    const { data, user_id, target_lang, file_base64, file_id, file_url, upload_id, sheet_name, sheet_names } = event;
 
-    if (!data || !target_lang || !file_base64 || (!isAdmin && !user_id)) {
+    if (!target_lang || (!file_base64 && !file_id && !file_url && !upload_id) || (!isAdmin && !user_id)) {
       return {
         isBase64Encoded: false,
         statusCode: 400,
         data: { error: '缺少必要参数' }
       };
     }
-
-    const workbookPayload = isWorkbookPayload(data)
-      ? data
-      : { [sheet_name || '__DEFAULT__']: data };
-    const cellsToTranslate = Object.values(workbookPayload).reduce((sum, sheetData) => {
-      return sum + Object.keys(sheetData || {}).length;
-    }, 0);
     let card = null;
     let total = 0;
     let used = 0;
@@ -193,10 +234,60 @@ exports.main = async (event, context) => {
     }
 
     // 3. 处理 Excel
-    const base64Data = file_base64.includes(',') ? file_base64.split(',').pop() : file_base64;
-    const buffer = Buffer.from(base64Data, 'base64');
+    let buffer = null;
+    if (upload_id) {
+      buffer = await loadBufferFromUploadId(upload_id);
+    } else if (file_id) {
+      const fileRes = await app.downloadFile({ fileID: file_id });
+      buffer = fileRes.fileContent;
+    } else if (file_url) {
+      const fileRes = await axios.get(file_url, {
+        responseType: 'arraybuffer',
+        timeout: 60000
+      });
+      buffer = Buffer.from(fileRes.data);
+    } else {
+      const base64Data = file_base64.includes(',') ? file_base64.split(',').pop() : file_base64;
+      buffer = Buffer.from(base64Data, 'base64');
+    }
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer);
+
+    let workbookPayload = {};
+
+    if (data && typeof data === 'object' && Object.keys(data).length > 0) {
+      workbookPayload = isWorkbookPayload(data)
+        ? data
+        : { [sheet_name || '__DEFAULT__']: data };
+    } else {
+      const requestedSheetNames = Array.isArray(sheet_names) && sheet_names.length > 0
+        ? sheet_names
+        : [sheet_name || (workbook.worksheets[0] && workbook.worksheets[0].name)].filter(Boolean);
+
+      for (const requestedSheetName of requestedSheetNames) {
+        const worksheet = workbook.getWorksheet(requestedSheetName);
+        if (!worksheet) {
+          throw new Error(`工作表不存在: ${requestedSheetName}`);
+        }
+
+        const sheetPayload = extractWorksheetPayload(worksheet);
+        if (Object.keys(sheetPayload).length > 0) {
+          workbookPayload[requestedSheetName] = sheetPayload;
+        }
+      }
+    }
+
+    const cellsToTranslate = Object.values(workbookPayload).reduce((sum, sheetData) => {
+      return sum + Object.keys(sheetData || {}).length;
+    }, 0);
+
+    if (!cellsToTranslate) {
+      return {
+        isBase64Encoded: false,
+        statusCode: 400,
+        data: { error: '当前文件没有可翻译内容' }
+      };
+    }
 
     for (const [requestedSheetName, sheetData] of Object.entries(workbookPayload)) {
       const resolvedSheetName = requestedSheetName === '__DEFAULT__'

@@ -28,6 +28,7 @@
           class="upload-box"
           drag
           :auto-upload="false"
+          :disabled="isProcessing"
           :show-file-list="false"
           accept=".xlsx,.xls"
           :on-change="handleFileChange"
@@ -61,7 +62,21 @@
         <div class="file-meta" v-if="sheetNames.length">
           <span>工作表数量：{{ sheetNames.length }}</span>
           <span>{{ selectionSummary }}</span>
-          <span>待翻译内容：{{ displayTotalCells }}</span>
+          <span>预览条数：{{ displayTotalCells }}</span>
+        </div>
+
+        <div v-if="isProcessing" class="status-card">
+          <div class="status-head">
+            <strong>{{ stageTitle }}</strong>
+            <span v-if="showUploadProgress">{{ uploadProgress }}%</span>
+          </div>
+          <el-progress
+            v-if="showUploadProgress"
+            :percentage="uploadProgress"
+            :stroke-width="10"
+            :show-text="false"
+          />
+          <p>{{ stageDescription }}</p>
         </div>
       </section>
 
@@ -88,17 +103,17 @@
             type="primary"
             class="translate-btn"
             :loading="translating"
-            :disabled="!previewRows.length || !fileBase64"
+            :disabled="isProcessing || !previewRows.length || !uploadId"
             @click="handleTranslate"
           >
             开始翻译
           </el-button>
         </el-form>
 
-        <div v-if="downloadUrl" class="result-box">
+        <div v-if="hasDownloadResult" class="result-box">
           <div class="result-title">翻译完成</div>
           <p>结果文件已生成，可以直接下载。</p>
-          <el-button type="success" plain @click="downloadFile">
+          <el-button type="success" plain :loading="downloading" @click="downloadFile">
             下载结果文件
           </el-button>
         </div>
@@ -117,7 +132,16 @@
         empty-text="上传并解析文件后，会在这里展示待翻译内容"
       >
         <el-table-column v-if="showSheetColumn" prop="sheet_name" label="工作表" width="180" />
-        <el-table-column prop="coordinate" label="坐标" width="120" />
+        <el-table-column label="类型" width="110">
+          <template #default="{ row }">
+            {{ row.source === 'shape' ? '形状' : '单元格' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="位置" width="140">
+          <template #default="{ row }">
+            {{ formatPreviewLocation(row) }}
+          </template>
+        </el-table-column>
         <el-table-column prop="text" label="原文内容" min-width="320" />
       </el-table>
     </section>
@@ -129,14 +153,17 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
+import { downloadPythonResult } from '../api/python'
 import { parseExcel } from '../api/parse'
-import { translateExcel, type TranslateSheetData } from '../api/translate'
+import { translateExcel } from '../api/translate'
+import { uploadFileToTcb } from '../lib/tcb'
 import { useAuthStore } from '../stores/auth'
 
 type SheetPreviewItem = {
   coordinate: string
   text: string
   sheet_name?: string
+  source?: 'cell' | 'shape'
 }
 
 type PreviewRow = SheetPreviewItem & {
@@ -147,11 +174,17 @@ const authStore = useAuthStore()
 
 const activeStep = ref(0)
 const fileName = ref('')
-const fileBase64 = ref('')
+const uploadId = ref('')
 const totalCells = ref(0)
 const targetLang = ref('中文')
 const translating = ref(false)
+const downloading = ref(false)
+const parsing = ref(false)
+const currentStage = ref<'idle' | 'auth' | 'upload' | 'url' | 'parse' | 'translate' | 'download'>('idle')
+const uploadProgress = ref(0)
 const downloadUrl = ref('')
+const downloadResultId = ref('')
+const downloadFileName = ref('')
 const sheetNames = ref<string[]>([])
 const selectedSheetName = ref('')
 const previewsBySheet = ref<Record<string, SheetPreviewItem[]>>({})
@@ -206,14 +239,27 @@ const previewRows = computed<PreviewRow[]>(() => {
   }))
 })
 const showSheetColumn = computed(() => isWholeFileMode.value && sheetNames.value.length > 1)
-
-const readFileAsBase64 = (file: File) =>
-  new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error('文件读取失败'))
-    reader.readAsDataURL(file)
-  })
+const hasDownloadResult = computed(() => !!downloadUrl.value || !!downloadResultId.value)
+const isProcessing = computed(() => parsing.value || translating.value || downloading.value)
+const showUploadProgress = computed(() => currentStage.value === 'upload' || currentStage.value === 'download')
+const stageTitle = computed(() => {
+  if (currentStage.value === 'auth') return '正在建立上传会话'
+  if (currentStage.value === 'upload') return '正在分片上传文件'
+  if (currentStage.value === 'url') return '正在提交上传结果'
+  if (currentStage.value === 'parse') return '正在解析 Excel 内容'
+  if (currentStage.value === 'translate') return '正在执行翻译'
+  if (currentStage.value === 'download') return '正在准备下载结果文件'
+  return '正在处理'
+})
+const stageDescription = computed(() => {
+  if (currentStage.value === 'auth') return '系统正在创建当前文件的分片上传会话。'
+  if (currentStage.value === 'upload') return '文件会拆成多个小片段上传，避免触发网关请求体大小限制。'
+  if (currentStage.value === 'url') return '所有分片已上传，正在确认文件可供后续解析和翻译使用。'
+  if (currentStage.value === 'parse') return 'Python 服务正在读取文件并提取工作表预览。'
+  if (currentStage.value === 'translate') return 'Python 服务正在调用模型并生成新的 Excel 文件。'
+  if (currentStage.value === 'download') return '系统正在分片读取结果文件并在浏览器中拼装下载内容。'
+  return ''
+})
 
 const resetParsedState = () => {
   totalCells.value = 0
@@ -223,11 +269,14 @@ const resetParsedState = () => {
   totalCellsBySheet.value = {}
 }
 
-const buildSheetPayload = (items: SheetPreviewItem[]) =>
-  items.reduce<TranslateSheetData>((acc, item) => {
-    acc[item.coordinate] = item.text
-    return acc
-  }, {})
+const formatPreviewLocation = (row: SheetPreviewItem) => {
+  if (row.source === 'shape') {
+    const match = String(row.coordinate || '').match(/^S(\d+)$/i)
+    return match ? `形状 ${match[1]}` : '形状文本'
+  }
+
+  return row.coordinate || '-'
+}
 
 const handleFileChange = async (uploadFile: UploadFile) => {
   const rawFile = uploadFile.raw
@@ -241,14 +290,26 @@ const handleFileChange = async (uploadFile: UploadFile) => {
 
   try {
     fileName.value = rawFile.name
-    fileBase64.value = await readFileAsBase64(rawFile)
+    uploadId.value = ''
     downloadUrl.value = ''
+    downloadResultId.value = ''
+    downloadFileName.value = ''
+    uploadProgress.value = 0
+    parsing.value = true
+    currentStage.value = 'auth'
     resetParsedState()
     activeStep.value = 1
 
+    const uploaded = await uploadFileToTcb(rawFile, ({ stage, progress }) => {
+      currentStage.value = stage
+      if (typeof progress === 'number') uploadProgress.value = progress
+    })
+    uploadId.value = uploaded.fileID
+
+    currentStage.value = 'parse'
     const res = await parseExcel({
       user_id: authStore.userId || '',
-      file_base64: fileBase64.value
+      upload_id: uploadId.value
     })
 
     const parsedSheetNames = res.data?.sheet_names || (res.data?.sheet_name ? [res.data.sheet_name] : [])
@@ -264,37 +325,30 @@ const handleFileChange = async (uploadFile: UploadFile) => {
     ElMessage.success('文件解析成功')
   } catch (error) {
     resetParsedState()
-    fileBase64.value = ''
+    uploadId.value = ''
     activeStep.value = 0
     ElMessage.error(error instanceof Error ? error.message : '文件解析失败')
+  } finally {
+    parsing.value = false
+    currentStage.value = 'idle'
   }
 }
 
 const handleTranslate = async () => {
-  if (!fileBase64.value || !sheetNames.value.length) {
+  if (!uploadId.value || !sheetNames.value.length) {
     ElMessage.warning('请先上传并解析 Excel 文件')
     return
   }
 
-  let payload: TranslateSheetData | Record<string, TranslateSheetData>
   let targetSheetName: string | undefined
   let targetSheetNames: string[] | undefined
 
   if (isWholeFileMode.value) {
-    const workbookPayload = sheetNames.value.reduce<Record<string, TranslateSheetData>>((acc, sheetName) => {
-      const sheetPayload = buildSheetPayload(previewsBySheet.value[sheetName] || [])
-      if (Object.keys(sheetPayload).length > 0) {
-        acc[sheetName] = sheetPayload
-      }
-      return acc
-    }, {})
-
-    if (!Object.keys(workbookPayload).length) {
+    if (!totalCells.value) {
       ElMessage.warning('当前文件没有可翻译内容')
       return
     }
 
-    payload = workbookPayload
     targetSheetNames = sheetNames.value
   } else {
     const targetSheet = selectedSheetName.value || sheetNames.value[0]
@@ -303,32 +357,32 @@ const handleTranslate = async () => {
       return
     }
 
-    const sheetPayload = buildSheetPayload(previewsBySheet.value[targetSheet] || [])
-    if (!Object.keys(sheetPayload).length) {
+    if (!(totalCellsBySheet.value[targetSheet] ?? 0)) {
       ElMessage.warning('当前工作表没有可翻译内容')
       return
     }
 
-    payload = sheetPayload
     targetSheetName = targetSheet
   }
 
   translating.value = true
+  currentStage.value = 'translate'
   try {
     const res = await translateExcel({
       user_id: authStore.userId || '',
       target_lang: targetLang.value,
-      data: payload,
-      file_base64: fileBase64.value,
+      upload_id: uploadId.value,
       sheet_name: targetSheetName,
       sheet_names: targetSheetNames
     })
 
-    if (!res.data?.file_url) {
+    if (!res.data?.file_url && !res.data?.result_id) {
       throw new Error(res.data?.error || '翻译结果为空')
     }
 
-    downloadUrl.value = res.data.file_url
+    downloadUrl.value = res.data?.file_url || ''
+    downloadResultId.value = res.data?.result_id || ''
+    downloadFileName.value = res.data?.file_name || `${(fileName.value || 'translated').replace(/\.(xlsx|xls)$/i, '')}-translated.xlsx`
     activeStep.value = 3
 
     if (authStore.userRole !== 'admin') {
@@ -341,19 +395,43 @@ const handleTranslate = async () => {
     ElMessage.error(error instanceof Error ? error.message : '翻译失败')
   } finally {
     translating.value = false
+    currentStage.value = 'idle'
   }
 }
 
-const downloadFile = () => {
-  if (!downloadUrl.value) return
+const downloadFile = async () => {
+  if (!hasDownloadResult.value) return
 
-  const link = document.createElement('a')
-  const cleanName = (fileName.value || 'translated.xlsx').replace(/\.(xlsx|xls)$/i, '')
-  link.href = downloadUrl.value
-  link.download = `${cleanName}-translated.xlsx`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+  downloading.value = true
+  currentStage.value = 'download'
+  uploadProgress.value = 0
+
+  try {
+    const cleanName = (fileName.value || 'translated.xlsx').replace(/\.(xlsx|xls)$/i, '')
+    const result = await downloadPythonResult({
+      resultId: downloadResultId.value,
+      fileUrl: downloadUrl.value,
+      fileName: downloadFileName.value || `${cleanName}-translated.xlsx`,
+      onProgress: (progress) => {
+        uploadProgress.value = progress
+      }
+    })
+
+    const objectUrl = URL.createObjectURL(result.blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = result.fileName || `${cleanName}-translated.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(objectUrl)
+    ElMessage.success('结果文件已开始下载')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '下载结果文件失败')
+  } finally {
+    downloading.value = false
+    currentStage.value = 'idle'
+  }
 }
 </script>
 
@@ -361,6 +439,9 @@ const downloadFile = () => {
 .workspace-page {
   display: grid;
   gap: 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+  min-width: 0;
 }
 
 .workspace-header {
@@ -382,12 +463,19 @@ const downloadFile = () => {
 
 .steps-card {
   padding-top: 28px;
+  overflow-x: auto;
 }
 
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
   gap: 24px;
+}
+
+.upload-card,
+.config-card,
+.preview-card {
+  min-width: 0;
 }
 
 .section-head {
@@ -437,6 +525,38 @@ const downloadFile = () => {
   color: var(--text-muted);
 }
 
+.status-card {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f7faff, #eef4ff);
+  border: 1px solid rgba(49, 94, 251, 0.14);
+}
+
+.status-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.status-head strong {
+  font-size: 15px;
+  color: var(--text-main);
+}
+
+.status-head span {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.status-card p {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
 .mode-tip {
   margin-bottom: 16px;
   padding: 14px 16px;
@@ -464,6 +584,12 @@ const downloadFile = () => {
   margin-bottom: 8px;
 }
 
+@media (max-width: 1280px) {
+  .workspace-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  }
+}
+
 @media (max-width: 1024px) {
   .workspace-grid {
     grid-template-columns: 1fr;
@@ -472,6 +598,79 @@ const downloadFile = () => {
   .workspace-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 768px) {
+  .workspace-page {
+    gap: 16px;
+  }
+
+  .workspace-header h2 {
+    font-size: 24px;
+  }
+
+  .workspace-header p {
+    font-size: 14px;
+  }
+
+  .steps-card {
+    padding-top: 18px;
+  }
+
+  .steps-card :deep(.el-step__title) {
+    white-space: nowrap;
+  }
+
+  .section-head {
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+
+  .section-head h3 {
+    font-size: 20px;
+  }
+
+  .file-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .status-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .preview-card {
+    overflow-x: auto;
+  }
+
+  .preview-card :deep(.el-table) {
+    min-width: 620px;
+  }
+}
+
+@media (max-width: 560px) {
+  .workspace-header {
+    gap: 10px;
+  }
+
+  .workspace-header h2 {
+    font-size: 22px;
+  }
+
+  .steps-card :deep(.el-step__main) {
+    min-width: 92px;
+  }
+
+  .mode-tip,
+  .result-box,
+  .status-card {
+    padding: 14px;
+  }
+
+  .upload-icon {
+    font-size: 40px;
   }
 }
 </style>
